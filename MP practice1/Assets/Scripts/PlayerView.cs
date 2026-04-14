@@ -8,10 +8,11 @@ public class PlayerView : NetworkBehaviour
 {
     [SerializeField] private PlayerNetwork _playerNetwork;
     [SerializeField] private Renderer _bodyRenderer;
-    [SerializeField] private Vector3 _labelOffset = new(0f, 2.3f, 0f);
+    [SerializeField] private Vector3 _labelOffset = new(0f, 1.8f, 0f);
     [SerializeField] private float _labelScale = 0.32f;
     [SerializeField] private Color _ownerColor = new(0.36f, 0.84f, 0.44f);
     [SerializeField] private Color _remoteColor = new(0.25f, 0.48f, 1f);
+    [SerializeField] private Color _deadLabelColor = new(1f, 0.42f, 0.42f);
 
     private Transform _labelRoot;
     private TextMeshPro _nicknameText;
@@ -37,10 +38,11 @@ public class PlayerView : NetworkBehaviour
 
         _playerNetwork.Nickname.OnValueChanged += OnNicknameChanged;
         _playerNetwork.HP.OnValueChanged += OnHpChanged;
+        _playerNetwork.IsAlive.OnValueChanged += OnIsAliveChanged;
 
         OnNicknameChanged(default, _playerNetwork.Nickname.Value);
         OnHpChanged(default, _playerNetwork.HP.Value);
-        ApplyVisualState();
+        ApplyVisualState(_playerNetwork.IsAlive.Value);
     }
 
     public override void OnNetworkDespawn()
@@ -52,6 +54,7 @@ public class PlayerView : NetworkBehaviour
 
         _playerNetwork.Nickname.OnValueChanged -= OnNicknameChanged;
         _playerNetwork.HP.OnValueChanged -= OnHpChanged;
+        _playerNetwork.IsAlive.OnValueChanged -= OnIsAliveChanged;
     }
 
     private void LateUpdate()
@@ -81,10 +84,18 @@ public class PlayerView : NetworkBehaviour
 
     private void OnHpChanged(int _, int newValue)
     {
-        if (_hpText != null)
+        if (_hpText == null)
         {
-            _hpText.text = $"HP: {newValue}";
+            return;
         }
+
+        _hpText.text = _playerNetwork.IsAlive.Value ? $"HP: {newValue}" : "DEAD";
+    }
+
+    private void OnIsAliveChanged(bool _, bool isAlive)
+    {
+        ApplyVisualState(isAlive);
+        OnHpChanged(default, _playerNetwork.HP.Value);
     }
 
     private void EnsureRuntimeLabel()
@@ -94,7 +105,7 @@ public class PlayerView : NetworkBehaviour
             return;
         }
 
-        GameObject root = new GameObject("PlayerRuntimeView");
+        GameObject root = new("PlayerRuntimeView");
         root.transform.SetParent(transform, false);
         root.transform.localPosition = _labelOffset + GetStableHorizontalOffset();
         root.transform.localScale = Vector3.one * _labelScale;
@@ -106,7 +117,7 @@ public class PlayerView : NetworkBehaviour
 
     private TextMeshPro CreateText(string objectName, Vector3 localPosition, float fontSize, FontStyles fontStyles, Color color)
     {
-        GameObject textObject = new GameObject(objectName);
+        GameObject textObject = new(objectName);
         textObject.transform.SetParent(_labelRoot, false);
         textObject.transform.localPosition = localPosition;
 
@@ -121,14 +132,23 @@ public class PlayerView : NetworkBehaviour
         return text;
     }
 
-    private void ApplyVisualState()
+    private void ApplyVisualState(bool isAlive)
     {
-        if (_bodyRenderer == null)
+        if (_bodyRenderer != null)
         {
-            return;
+            _bodyRenderer.enabled = isAlive;
+            _bodyRenderer.material.color = IsOwner ? _ownerColor : _remoteColor;
         }
 
-        _bodyRenderer.material.color = IsOwner ? _ownerColor : _remoteColor;
+        if (_nicknameText != null)
+        {
+            _nicknameText.color = isAlive ? Color.white : _deadLabelColor;
+        }
+
+        if (_hpText != null)
+        {
+            _hpText.color = isAlive ? new Color(1f, 0.85f, 0.35f) : _deadLabelColor;
+        }
     }
 
     private Vector3 GetStableHorizontalOffset()

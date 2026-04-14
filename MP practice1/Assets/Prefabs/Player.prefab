@@ -17,6 +17,8 @@ GameObject:
   - component: {fileID: 6152213152213152215}
   - component: {fileID: 6152213152213152216}
   - component: {fileID: 6152213152213152217}
+  - component: {fileID: 6152213152213152218}
+  - component: {fileID: 6152213152213152219}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -36,7 +38,8 @@ Transform:
   m_LocalPosition: {x: 0, y: 1, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 198000991241170736}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!33 &3368649110322570542
@@ -89,8 +92,8 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!136 &5326089540566221105
-CapsuleCollider:
+--- !u!143 &5326089540566221105
+CharacterController:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
@@ -107,10 +110,13 @@ CapsuleCollider:
   m_IsTrigger: 0
   m_ProvidesContacts: 0
   m_Enabled: 1
-  serializedVersion: 2
-  m_Radius: 0.5
+  serializedVersion: 3
   m_Height: 2
-  m_Direction: 1
+  m_Radius: 0.5
+  m_SlopeLimit: 45
+  m_StepOffset: 0.3
+  m_SkinWidth: 0.08
+  m_MinMoveDistance: 0.001
   m_Center: {x: 0, y: 0, z: 0}
 --- !u!114 &6152213152213152213
 MonoBehaviour:
@@ -124,7 +130,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 2577600167
+  GlobalObjectIdHash: 3589186180
   InScenePlacedSourceGlobalObjectIdHash: 0
   AlwaysReplicateAsRoot: 0
   SynchronizeTransform: 1
@@ -142,10 +148,10 @@ MonoBehaviour:
   m_GameObject: {fileID: 1881137300487393003}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: e96cb6065543e43c4a752faaa1468eb1, type: 3}
+  m_Script: {fileID: 11500000, guid: 6c2f7f8d7bbf4a32981338c301a4b20d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  UseUnreliableDeltas: 0
+  UseUnreliableDeltas: 1
   SyncPositionX: 1
   SyncPositionY: 1
   SyncPositionZ: 1
@@ -155,8 +161,8 @@ MonoBehaviour:
   SyncScaleX: 1
   SyncScaleY: 1
   SyncScaleZ: 1
-  PositionThreshold: 0
-  RotAngleThreshold: 0
+  PositionThreshold: 0.001
+  RotAngleThreshold: 0.01
   ScaleThreshold: 0
   UseQuaternionSynchronization: 0
   UseQuaternionCompression: 0
@@ -164,6 +170,8 @@ MonoBehaviour:
   InLocalSpace: 0
   Interpolate: 1
   SlerpPosition: 0
+  _enableUnreliableDeltas: 1
+  _enableInterpolation: 1
 --- !u!114 &6152213152213152215
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -178,6 +186,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _startingHp: 100
   _spawnSpacing: 3
+  _respawnDelay: 3
   Nickname:
     m_InternalValue:
       utf8LengthInBytes: 0
@@ -215,6 +224,10 @@ MonoBehaviour:
         byte0029: 0
   HP:
     m_InternalValue: 100
+  IsAlive:
+    m_InternalValue: 1
+  RespawnEndTime:
+    m_InternalValue: 0
 --- !u!114 &6152213152213152216
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -231,8 +244,9 @@ MonoBehaviour:
   _bodyRenderer: {fileID: 5802075351425319539}
   _labelOffset: {x: 0, y: 1.8, z: 0}
   _labelScale: 0.32
-  _ownerColor: {r: 0.36, g: 0.84, b: 0.44, a: 1}
+  _ownerColor: {r: 0.45832404, g: 0.19339623, b: 0.7735849, a: 1}
   _remoteColor: {r: 0.25, g: 0.48, b: 1, a: 1}
+  _deadLabelColor: {r: 1, g: 0.42, b: 0.42, a: 1}
 --- !u!114 &6152213152213152217
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -245,5 +259,73 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0092f8b1d19654b408fb31dbfc96e7ae, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _playerNetwork: {fileID: 6152213152213152215}
-  _damage: 10
+  _meleeDamage: 10
+  _meleeRange: 2.25
+  _projectilePrefab: {fileID: 3072701274808924429, guid: a8d382c55801b514db3b1aba58e4233c, type: 3}
+  _firePoint: {fileID: 198000991241170736}
+  _cooldown: 0.4
+  _maxAmmo: 10
+  _projectileSpawnOffset: {x: 0, y: 0.35, z: 0.9}
+  _projectileHotkey: 32
+  CurrentAmmo:
+    m_InternalValue: 0
+--- !u!114 &6152213152213152218
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1881137300487393003}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f1b42fd4b5fd4b0f8f9b4f5ce4c9ad01, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _speed: 5
+  _gravity: -18
+  _rotationSpeed: 18
+--- !u!114 &6152213152213152219
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1881137300487393003}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 36f50b1e81cb4149a8fb93d81f8ac312, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _offset: {x: 0, y: 8, z: -6}
+  _lookOffset: {x: 0, y: 1, z: 0}
+--- !u!1 &7856232257249395429
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 198000991241170736}
+  m_Layer: 0
+  m_Name: Fire point
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &198000991241170736
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7856232257249395429}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.17, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 2989265087724030240}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
