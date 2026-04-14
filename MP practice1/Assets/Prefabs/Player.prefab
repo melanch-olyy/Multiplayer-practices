@@ -170,8 +170,8 @@ MonoBehaviour:
   InLocalSpace: 0
   Interpolate: 1
   SlerpPosition: 0
-  _enableUnreliableDeltas: 1
-  _enableInterpolation: 1
+  _positionThreshold: 0.005
+  _rotationThreshold: 0.25
 --- !u!114 &6152213152213152215
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -244,8 +244,11 @@ MonoBehaviour:
   _bodyRenderer: {fileID: 5802075351425319539}
   _labelOffset: {x: 0, y: 1.8, z: 0}
   _labelScale: 0.32
-  _ownerColor: {r: 0.45832404, g: 0.19339623, b: 0.7735849, a: 1}
-  _remoteColor: {r: 0.25, g: 0.48, b: 1, a: 1}
+  _playerOneColor: {r: 0.56078434, g: 0.14978638, b: 0.6226415, a: 1}
+  _playerTwoColor: {r: 0.25, g: 0.48, b: 1, a: 1}
+  _fallbackSaturation: 0.62
+  _fallbackValue: 0.92
+  _deadDarkenFactor: 0.36
   _deadLabelColor: {r: 1, g: 0.42, b: 0.42, a: 1}
 --- !u!114 &6152213152213152217
 MonoBehaviour:
@@ -266,6 +269,7 @@ MonoBehaviour:
   _cooldown: 0.4
   _maxAmmo: 10
   _projectileSpawnOffset: {x: 0, y: 0.35, z: 0.9}
+  _maxClientShotOriginOffset: 2.5
   _projectileHotkey: 32
   CurrentAmmo:
     m_InternalValue: 0
@@ -284,6 +288,8 @@ MonoBehaviour:
   _speed: 5
   _gravity: -18
   _rotationSpeed: 18
+  _acceleration: 20
+  _deceleration: 24
 --- !u!114 &6152213152213152219
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -10,8 +10,11 @@ public class PlayerView : NetworkBehaviour
     [SerializeField] private Renderer _bodyRenderer;
     [SerializeField] private Vector3 _labelOffset = new(0f, 1.8f, 0f);
     [SerializeField] private float _labelScale = 0.32f;
-    [SerializeField] private Color _ownerColor = new(0.36f, 0.84f, 0.44f);
-    [SerializeField] private Color _remoteColor = new(0.25f, 0.48f, 1f);
+    [SerializeField] private Color _playerOneColor = new(0.36f, 0.84f, 0.44f);
+    [SerializeField] private Color _playerTwoColor = new(0.25f, 0.48f, 1f);
+    [SerializeField] private float _fallbackSaturation = 0.62f;
+    [SerializeField] private float _fallbackValue = 0.92f;
+    [SerializeField] private float _deadDarkenFactor = 0.36f;
     [SerializeField] private Color _deadLabelColor = new(1f, 0.42f, 0.42f);
 
     private Transform _labelRoot;
@@ -137,7 +140,10 @@ public class PlayerView : NetworkBehaviour
         if (_bodyRenderer != null)
         {
             _bodyRenderer.enabled = isAlive;
-            _bodyRenderer.material.color = IsOwner ? _ownerColor : _remoteColor;
+            Color identityColor = ResolvePlayerColor();
+            _bodyRenderer.material.color = isAlive
+                ? identityColor
+                : Color.Lerp(identityColor, Color.black, Mathf.Clamp01(_deadDarkenFactor));
         }
 
         if (_nicknameText != null)
@@ -155,5 +161,22 @@ public class PlayerView : NetworkBehaviour
     {
         float horizontalOffset = OwnerClientId % 2 == 0 ? -0.45f : 0.45f;
         return new Vector3(horizontalOffset, 0f, 0f);
+    }
+
+    private Color ResolvePlayerColor()
+    {
+        if (OwnerClientId == 0ul)
+        {
+            return _playerOneColor;
+        }
+
+        if (OwnerClientId == 1ul)
+        {
+            return _playerTwoColor;
+        }
+
+        float goldenRatio = 0.61803395f;
+        float hue = Mathf.Repeat((OwnerClientId + 1ul) * goldenRatio, 1f);
+        return Color.HSVToRGB(hue, Mathf.Clamp01(_fallbackSaturation), Mathf.Clamp01(_fallbackValue));
     }
 }
