@@ -1,5 +1,7 @@
 using TMPro;
-using Unity.Netcode;
+using FishNet;
+using FishNet.Managing;
+using FishNet.Managing.Timing;
 using UnityEngine;
 
 [RequireComponent(typeof(Canvas))]
@@ -38,7 +40,7 @@ public class PlayerHud : MonoBehaviour
             return;
         }
 
-        float remaining = Mathf.Max(0f, _localPlayer.RespawnEndTime.Value - (float)NetworkManager.Singleton.ServerTime.Time);
+        float remaining = Mathf.Max(0f, _localPlayer.RespawnEndTime.Value - GetNetworkTimeSeconds());
         _respawnText.text = $"Respawn in {remaining:0.0}s";
     }
 
@@ -56,7 +58,8 @@ public class PlayerHud : MonoBehaviour
 
         _nextLookupTime = Time.unscaledTime + 0.5f;
 
-        if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsListening)
+        NetworkManager networkManager = ResolveNetworkManager();
+        if (networkManager == null || (!networkManager.IsClientStarted && !networkManager.IsServerStarted))
         {
             _localPlayer = null;
             _localCombat = null;
@@ -134,5 +137,17 @@ public class PlayerHud : MonoBehaviour
         text.enableWordWrapping = false;
 
         return text;
+    }
+
+    private static NetworkManager ResolveNetworkManager()
+    {
+        NetworkManager networkManager = InstanceFinder.NetworkManager;
+        return networkManager != null ? networkManager : FindObjectOfType<NetworkManager>();
+    }
+
+    private static float GetNetworkTimeSeconds()
+    {
+        TimeManager timeManager = InstanceFinder.TimeManager;
+        return timeManager != null ? (float)timeManager.TicksToTime(timeManager.Tick) : Time.time;
     }
 }

@@ -1,5 +1,4 @@
-using Unity.Netcode;
-using Unity.Netcode.Components;
+using FishNet.Object;
 using UnityEngine;
 
 [RequireComponent(typeof(NetworkObject))]
@@ -9,34 +8,23 @@ public class Projectile : NetworkBehaviour
     [SerializeField] private float _speed = 18f;
     [SerializeField] private int _damage = 20;
     [SerializeField] private float _lifetime = 3f;
-    [SerializeField] private float _positionSyncThreshold = 0.02f;
-    [SerializeField] private float _rotationSyncThreshold = 1f;
 
     private Rigidbody _rigidbody;
-    private NetworkTransform _networkTransform;
     private Vector3 _moveDirection = Vector3.forward;
+    private PlayerNetwork _ownerPlayer;
     private float _despawnAt;
 
     private void Awake()
     {
         _rigidbody = GetComponent<Rigidbody>();
-        _networkTransform = GetComponent<NetworkTransform>();
-        ConfigureNetworkTransform();
     }
 
-    public override void OnNetworkSpawn()
+    public override void OnStartNetwork()
     {
         if (_rigidbody == null)
         {
             _rigidbody = GetComponent<Rigidbody>();
         }
-
-        if (_networkTransform == null)
-        {
-            _networkTransform = GetComponent<NetworkTransform>();
-        }
-
-        ConfigureNetworkTransform();
 
         if (_rigidbody != null)
         {
@@ -46,7 +34,7 @@ public class Projectile : NetworkBehaviour
             _rigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
         }
 
-        if (IsServer)
+        if (IsServerStarted)
         {
             _despawnAt = Time.time + _lifetime;
         }
@@ -54,8 +42,14 @@ public class Projectile : NetworkBehaviour
 
     private void FixedUpdate()
     {
-        if (!IsServer || !IsSpawned)
+        if (!IsServerStarted || !IsSpawned)
         {
+            return;
+        }
+
+        if (!GameSessionManager.IsGameplayActive)
+        {
+            Despawn();
             return;
         }
 
@@ -72,19 +66,25 @@ public class Projectile : NetworkBehaviour
 
         if (Time.time >= _despawnAt)
         {
-            NetworkObject.Despawn(true);
+            Despawn();
         }
     }
 
     public void Initialize(Vector3 direction)
     {
+        Initialize(direction, null);
+    }
+
+    public void Initialize(Vector3 direction, PlayerNetwork ownerPlayer)
+    {
+        _ownerPlayer = ownerPlayer;
         _moveDirection = direction.sqrMagnitude < 0.001f ? Vector3.forward : direction.normalized;
         transform.rotation = Quaternion.LookRotation(_moveDirection, Vector3.up);
     }
 
     private void OnTriggerEnter(Collider other)
     {
-        if (!IsServer || !IsSpawned)
+        if (!IsServerStarted || !IsSpawned || !GameSessionManager.IsGameplayActive)
         {
             return;
         }
@@ -92,38 +92,19 @@ public class Projectile : NetworkBehaviour
         PlayerNetwork target = other.GetComponentInParent<PlayerNetwork>();
         if (target != null)
         {
-            if (target.OwnerClientId == OwnerClientId)
+            if (target.OwnerId == OwnerId)
             {
                 return;
             }
 
-            target.ApplyDamage(_damage);
-            NetworkObject.Despawn(true);
+            target.ApplyDamage(_damage, _ownerPlayer);
+            Despawn();
             return;
         }
 
         if (!other.isTrigger)
         {
-            NetworkObject.Despawn(true);
+            Despawn();
         }
-    }
-
-    private void ConfigureNetworkTransform()
-    {
-        if (_networkTransform == null)
-        {
-            return;
-        }
-
-        _networkTransform.UseUnreliableDeltas = true;
-        _networkTransform.Interpolate = true;
-        _networkTransform.SyncScaleX = false;
-        _networkTransform.SyncScaleY = false;
-        _networkTransform.SyncScaleZ = false;
-        _networkTransform.SyncRotAngleX = false;
-        _networkTransform.SyncRotAngleY = true;
-        _networkTransform.SyncRotAngleZ = false;
-        _networkTransform.PositionThreshold = Mathf.Max(0.0001f, _positionSyncThreshold);
-        _networkTransform.RotAngleThreshold = Mathf.Max(0.01f, _rotationSyncThreshold);
     }
 }

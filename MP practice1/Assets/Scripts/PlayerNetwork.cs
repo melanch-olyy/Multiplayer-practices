@@ -1,7 +1,8 @@
-using System.Collections;
 using System;
-using Unity.Collections;
-using Unity.Netcode;
+using System.Collections;
+using FishNet.Connection;
+using FishNet.Object;
+using FishNet.Object.Synchronizing;
 using UnityEngine;
 
 [RequireComponent(typeof(NetworkObject))]
@@ -11,55 +12,65 @@ public class PlayerNetwork : NetworkBehaviour
     [SerializeField] private float _spawnSpacing = 3f;
     [SerializeField] private float _respawnDelay = 3f;
 
-    public NetworkVariable<FixedString32Bytes> Nickname = new(
-        default,
-        NetworkVariableReadPermission.Everyone,
-        NetworkVariableWritePermission.Server);
-
-    public NetworkVariable<int> HP = new(
-        100,
-        NetworkVariableReadPermission.Everyone,
-        NetworkVariableWritePermission.Server);
-
-    public NetworkVariable<bool> IsAlive = new(
-        true,
-        NetworkVariableReadPermission.Everyone,
-        NetworkVariableWritePermission.Server);
-
-    public NetworkVariable<float> RespawnEndTime = new(
-        0f,
-        NetworkVariableReadPermission.Everyone,
-        NetworkVariableWritePermission.Server);
+    public readonly SyncVar<string> Nickname = new(string.Empty);
+    public readonly SyncVar<int> HP = new(100);
+    public readonly SyncVar<int> Score = new(0);
+    public readonly SyncVar<bool> IsAlive = new(true);
+    public readonly SyncVar<float> RespawnEndTime = new(0f);
 
     public int MaxHp => _startingHp;
+    public ulong OwnerIdAsUlong => OwnerId < 0 ? 0UL : (ulong)OwnerId;
 
-    private OwnerNetworkTransform _networkTransform;
     private CharacterController _characterController;
     private PlayerCombat _playerCombat;
+    private PlayerMovement _playerMovement;
     private Coroutine _respawnRoutine;
 
     private void Awake()
     {
-        _networkTransform = GetComponent<OwnerNetworkTransform>();
         _characterController = GetComponent<CharacterController>();
         _playerCombat = GetComponent<PlayerCombat>();
+        _playerMovement = GetComponent<PlayerMovement>();
     }
 
-    public override void OnNetworkSpawn()
+    public override void OnStartNetwork()
     {
-        HP.OnValueChanged += OnHpChanged;
-        IsAlive.OnValueChanged += OnIsAliveChanged;
+        HP.OnChange += OnHpChanged;
+        IsAlive.OnChange += OnIsAliveChanged;
+        ApplyControllerOwnershipState();
+    }
 
-        if (IsServer)
+    public override void OnStopNetwork()
+    {
+        HP.OnChange -= OnHpChanged;
+        IsAlive.OnChange -= OnIsAliveChanged;
+        ApplyControllerOwnershipState();
+    }
+
+    public override void OnStartServer()
+    {
+        Nickname.Value = BuildDefaultNickname(OwnerIdAsUlong);
+        HP.Value = Mathf.Max(0, _startingHp);
+        Score.Value = 0;
+        IsAlive.Value = true;
+        RespawnEndTime.Value = 0f;
+        MoveToSpawnPoint(initialSpawn: true);
+
+        ApplyControllerOwnershipState();
+    }
+
+    public override void OnStopServer()
+    {
+        if (_respawnRoutine != null)
         {
-            Nickname.Value = BuildDefaultNickname(OwnerClientId);
-            HP.Value = Mathf.Max(0, _startingHp);
-            IsAlive.Value = true;
-            RespawnEndTime.Value = 0f;
-            MoveToSpawnPoint(initialSpawn: true);
+            StopCoroutine(_respawnRoutine);
+            _respawnRoutine = null;
         }
+    }
 
-        if (IsOwner)
+    public override void OnStartClient()
+    {
+        if (base.IsOwner)
         {
             SubmitNicknameServerRpc(ConnectionUI.PlayerNickname);
         }
@@ -67,33 +78,25 @@ public class PlayerNetwork : NetworkBehaviour
         ApplyControllerOwnershipState();
     }
 
-    public override void OnNetworkDespawn()
+    public override void OnOwnershipClient(NetworkConnection prevOwner)
     {
-        HP.OnValueChanged -= OnHpChanged;
-        IsAlive.OnValueChanged -= OnIsAliveChanged;
-    }
-
-    public override void OnGainedOwnership()
-    {
-        base.OnGainedOwnership();
-        ApplyControllerOwnershipState();
-    }
-
-    public override void OnLostOwnership()
-    {
-        base.OnLostOwnership();
         ApplyControllerOwnershipState();
     }
 
     [ServerRpc]
     private void SubmitNicknameServerRpc(string nickname)
     {
-        Nickname.Value = SanitizeNickname(nickname, OwnerClientId);
+        Nickname.Value = SanitizeNickname(nickname, OwnerIdAsUlong);
     }
 
     public bool ApplyDamage(int damage)
     {
-        if (!IsServer || !IsAlive.Value)
+        return ApplyDamage(damage, null);
+    }
+
+    public bool ApplyDamage(int damage, PlayerNetwork attacker)
+    {
+        if (!IsServerStarted || !IsAlive.Value)
         {
             return false;
         }
@@ -104,13 +107,19 @@ public class PlayerNetwork : NetworkBehaviour
             return false;
         }
 
+        int previousHp = HP.Value;
         HP.Value = Mathf.Max(0, HP.Value - safeDamage);
+        if (previousHp > 0 && HP.Value <= 0 && attacker != null && attacker != this)
+        {
+            attacker.AddScore(1);
+        }
+
         return true;
     }
 
     public bool ApplyHeal(int amount)
     {
-        if (!IsServer || !IsAlive.Value)
+        if (!IsServerStarted || !IsAlive.Value)
         {
             return false;
         }
@@ -125,9 +134,45 @@ public class PlayerNetwork : NetworkBehaviour
         return true;
     }
 
-    private void OnHpChanged(int previousValue, int nextValue)
+    public void AddScore(int amount)
     {
-        if (!IsServer)
+        if (!IsServerStarted || amount <= 0)
+        {
+            return;
+        }
+
+        Score.Value += amount;
+    }
+
+    public void ResetForMatch(bool resetScore)
+    {
+        if (!IsServerStarted)
+        {
+            return;
+        }
+
+        if (_respawnRoutine != null)
+        {
+            StopCoroutine(_respawnRoutine);
+            _respawnRoutine = null;
+        }
+
+        if (resetScore)
+        {
+            Score.Value = 0;
+        }
+
+        MoveToSpawnPoint(initialSpawn: true);
+        HP.Value = Mathf.Max(0, _startingHp);
+        IsAlive.Value = true;
+        RespawnEndTime.Value = 0f;
+        _playerCombat?.RestoreAmmo();
+        ApplyControllerOwnershipState();
+    }
+
+    private void OnHpChanged(int previousValue, int nextValue, bool asServer)
+    {
+        if (!asServer || !IsServerStarted)
         {
             return;
         }
@@ -138,7 +183,7 @@ public class PlayerNetwork : NetworkBehaviour
         }
 
         IsAlive.Value = false;
-        RespawnEndTime.Value = (float)NetworkManager.ServerTime.Time + _respawnDelay;
+        RespawnEndTime.Value = GetNetworkTimeSeconds() + _respawnDelay;
 
         if (_respawnRoutine != null)
         {
@@ -148,9 +193,9 @@ public class PlayerNetwork : NetworkBehaviour
         _respawnRoutine = StartCoroutine(RespawnRoutine());
     }
 
-    private void OnIsAliveChanged(bool previousValue, bool nextValue)
+    private void OnIsAliveChanged(bool previousValue, bool nextValue, bool asServer)
     {
-        if (IsServer && nextValue)
+        if (asServer && IsServerStarted && nextValue)
         {
             RespawnEndTime.Value = 0f;
         }
@@ -178,8 +223,8 @@ public class PlayerNetwork : NetworkBehaviour
         if (PlayerSpawnManager.Instance != null)
         {
             hasSpawnPoint = initialSpawn
-                ? PlayerSpawnManager.Instance.TryGetInitialSpawnPoint(OwnerClientId, out spawnPosition)
-                : PlayerSpawnManager.Instance.TryGetRespawnPoint(OwnerClientId, out spawnPosition);
+                ? PlayerSpawnManager.Instance.TryGetInitialSpawnPoint(OwnerIdAsUlong, out spawnPosition)
+                : PlayerSpawnManager.Instance.TryGetRespawnPoint(OwnerIdAsUlong, out spawnPosition);
         }
         else
         {
@@ -188,7 +233,7 @@ public class PlayerNetwork : NetworkBehaviour
 
         if (!hasSpawnPoint)
         {
-            spawnPosition = BuildFallbackSpawnPosition(OwnerClientId);
+            spawnPosition = BuildFallbackSpawnPosition(OwnerIdAsUlong);
         }
 
         spawnPosition = BuildSafeSpawnPosition(spawnPosition);
@@ -268,9 +313,9 @@ public class PlayerNetwork : NetworkBehaviour
 
         transform.SetPositionAndRotation(position, rotation);
 
-        if (_networkTransform != null && _networkTransform.IsSpawned)
+        if (_playerMovement != null)
         {
-            _networkTransform.SetState(position, rotation, transform.localScale, teleportDisabled: false);
+            _playerMovement.SetPredictedState(position, rotation, 0f);
         }
 
         if (wasControllerEnabled)
@@ -279,7 +324,7 @@ public class PlayerNetwork : NetworkBehaviour
         }
     }
 
-    private static FixedString32Bytes SanitizeNickname(string nickname, ulong ownerClientId)
+    private static string SanitizeNickname(string nickname, ulong ownerClientId)
     {
         string trimmedValue = string.IsNullOrWhiteSpace(nickname) ? string.Empty : nickname.Trim();
         if (string.IsNullOrEmpty(trimmedValue))
@@ -287,20 +332,12 @@ public class PlayerNetwork : NetworkBehaviour
             return BuildDefaultNickname(ownerClientId);
         }
 
-        FixedString32Bytes safeNickname = default;
-        if (safeNickname.Append(trimmedValue) != FormatError.None)
-        {
-            return BuildDefaultNickname(ownerClientId);
-        }
-
-        return safeNickname;
+        return trimmedValue.Length <= 32 ? trimmedValue : trimmedValue.Substring(0, 32);
     }
 
-    private static FixedString32Bytes BuildDefaultNickname(ulong ownerClientId)
+    private static string BuildDefaultNickname(ulong ownerClientId)
     {
-        FixedString32Bytes defaultNickname = default;
-        defaultNickname.Append($"Player_{ownerClientId}");
-        return defaultNickname;
+        return $"Player_{ownerClientId}";
     }
 
     private Vector3 BuildFallbackSpawnPosition(ulong ownerClientId)
@@ -322,12 +359,17 @@ public class PlayerNetwork : NetworkBehaviour
             return;
         }
 
-        bool shouldEnableController = IsAlive.Value && (IsServer || IsOwner);
+        bool shouldEnableController = IsSpawned && IsAlive.Value && (IsOwner || IsServerStarted);
         if (_characterController.enabled == shouldEnableController)
         {
             return;
         }
 
         _characterController.enabled = shouldEnableController;
+    }
+
+    private float GetNetworkTimeSeconds()
+    {
+        return TimeManager != null ? (float)TimeManager.TicksToTime(TimeManager.Tick) : Time.time;
     }
 }

@@ -1,4 +1,5 @@
-using Unity.Netcode;
+using FishNet.Connection;
+using FishNet.Object;
 using UnityEngine;
 
 [RequireComponent(typeof(NetworkObject))]
@@ -41,7 +42,7 @@ public class HealthPickup : NetworkBehaviour
             return;
         }
 
-        if (IsServer)
+        if (IsServerStarted)
         {
             TryConsume(player);
             return;
@@ -52,7 +53,7 @@ public class HealthPickup : NetworkBehaviour
 
     private void OnTriggerStay(Collider other)
     {
-        if (IsServer || _isConsumed || !IsClient)
+        if (IsServerStarted || _isConsumed || !IsClientStarted)
         {
             return;
         }
@@ -67,20 +68,20 @@ public class HealthPickup : NetworkBehaviour
     }
 
     [ServerRpc(RequireOwnership = false)]
-    private void RequestPickupServerRpc(ulong playerObjectId, ServerRpcParams rpc = default)
+    private void RequestPickupServerRpc(int playerObjectId, NetworkConnection conn = null)
     {
-        if (_isConsumed || !IsSpawned || NetworkManager == null)
+        if (_isConsumed || !IsSpawned || ServerManager == null)
         {
             return;
         }
 
-        if (!NetworkManager.SpawnManager.SpawnedObjects.TryGetValue(playerObjectId, out NetworkObject playerObject))
+        if (!ServerManager.Objects.Spawned.TryGetValue(playerObjectId, out NetworkObject playerObject))
         {
             return;
         }
 
         PlayerNetwork player = playerObject.GetComponent<PlayerNetwork>();
-        if (player == null || player.OwnerClientId != rpc.Receive.SenderClientId)
+        if (player == null || player.Owner != conn)
         {
             return;
         }
@@ -102,12 +103,12 @@ public class HealthPickup : NetworkBehaviour
         }
 
         _nextClientRequestTime = Time.unscaledTime + 0.15f;
-        RequestPickupServerRpc(player.NetworkObjectId);
+        RequestPickupServerRpc(player.ObjectId);
     }
 
     private void TryConsume(PlayerNetwork player)
     {
-        if (!IsServer || _isConsumed || player == null || !player.IsAlive.Value)
+        if (!IsServerStarted || _isConsumed || player == null || !player.IsAlive.Value)
         {
             return;
         }
@@ -119,7 +120,7 @@ public class HealthPickup : NetworkBehaviour
 
         _isConsumed = true;
         _manager?.OnPickedUp(_spawnPoint);
-        NetworkObject.Despawn(true);
+        Despawn();
     }
 
     private void EnsureTriggerPhysics()

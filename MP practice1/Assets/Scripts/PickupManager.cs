@@ -1,6 +1,9 @@
 using System.Collections;
 using System.Collections.Generic;
-using Unity.Netcode;
+using FishNet;
+using FishNet.Managing;
+using FishNet.Object;
+using FishNet.Transporting;
 using UnityEngine;
 
 [ExecuteAlways]
@@ -64,7 +67,7 @@ public class PickupManager : MonoBehaviour
             return;
         }
 
-        if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsServer)
+        if (!IsServerRunning())
         {
             return;
         }
@@ -93,7 +96,7 @@ public class PickupManager : MonoBehaviour
     {
         yield return new WaitForSeconds(_respawnDelay);
 
-        if (this == null || !gameObject.activeInHierarchy || NetworkManager.Singleton == null || !NetworkManager.Singleton.IsServer)
+        if (this == null || !gameObject.activeInHierarchy || !IsServerRunning())
         {
             yield break;
         }
@@ -132,7 +135,15 @@ public class PickupManager : MonoBehaviour
         NetworkObject networkObject = pickupObject.GetComponent<NetworkObject>();
         if (networkObject != null)
         {
-            networkObject.Spawn();
+            NetworkManager networkManager = ResolveNetworkManager();
+            if (networkManager != null && networkManager.IsServerStarted)
+            {
+                networkManager.ServerManager.Spawn(networkObject);
+            }
+            else
+            {
+                Destroy(pickupObject);
+            }
         }
         else
         {
@@ -195,28 +206,48 @@ public class PickupManager : MonoBehaviour
 
     private void RegisterNetworkCallbacks()
     {
-        NetworkManager networkManager = NetworkManager.Singleton;
+        NetworkManager networkManager = ResolveNetworkManager();
         if (networkManager == null)
         {
             return;
         }
 
-        networkManager.OnServerStarted -= HandleServerStarted;
-        networkManager.OnServerStarted += HandleServerStarted;
-
-        networkManager.OnServerStopped -= HandleServerStopped;
-        networkManager.OnServerStopped += HandleServerStopped;
+        networkManager.ServerManager.OnServerConnectionState -= HandleServerConnectionState;
+        networkManager.ServerManager.OnServerConnectionState += HandleServerConnectionState;
     }
 
     private void UnregisterNetworkCallbacks()
     {
-        NetworkManager networkManager = NetworkManager.Singleton;
+        NetworkManager networkManager = ResolveNetworkManager();
         if (networkManager == null)
         {
             return;
         }
 
-        networkManager.OnServerStarted -= HandleServerStarted;
-        networkManager.OnServerStopped -= HandleServerStopped;
+        networkManager.ServerManager.OnServerConnectionState -= HandleServerConnectionState;
+    }
+
+    private void HandleServerConnectionState(ServerConnectionStateArgs args)
+    {
+        if (args.ConnectionState == LocalConnectionState.Started)
+        {
+            HandleServerStarted();
+        }
+        else if (args.ConnectionState == LocalConnectionState.Stopped)
+        {
+            HandleServerStopped(true);
+        }
+    }
+
+    private static NetworkManager ResolveNetworkManager()
+    {
+        NetworkManager networkManager = InstanceFinder.NetworkManager;
+        return networkManager != null ? networkManager : FindObjectOfType<NetworkManager>();
+    }
+
+    private static bool IsServerRunning()
+    {
+        NetworkManager networkManager = ResolveNetworkManager();
+        return networkManager != null && networkManager.IsServerStarted;
     }
 }

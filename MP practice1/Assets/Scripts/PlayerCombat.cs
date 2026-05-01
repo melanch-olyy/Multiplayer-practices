@@ -1,4 +1,6 @@
-using Unity.Netcode;
+using FishNet.Connection;
+using FishNet.Object;
+using FishNet.Object.Synchronizing;
 using UnityEngine;
 
 [RequireComponent(typeof(PlayerNetwork))]
@@ -7,6 +9,7 @@ public class PlayerCombat : NetworkBehaviour
     [Header("Melee")]
     [SerializeField] private int _meleeDamage = 10;
     [SerializeField] private float _meleeRange = 2.25f;
+    [SerializeField] private float _meleeCooldown = 0.3f;
 
     [Header("Projectile")]
     [SerializeField] private GameObject _projectilePrefab;
@@ -17,27 +20,23 @@ public class PlayerCombat : NetworkBehaviour
     [SerializeField] private float _maxClientShotOriginOffset = 2.5f;
     [SerializeField] private KeyCode _projectileHotkey = KeyCode.Space;
 
-    public NetworkVariable<int> CurrentAmmo = new(
-        0,
-        NetworkVariableReadPermission.Everyone,
-        NetworkVariableWritePermission.Server);
+    public readonly SyncVar<int> CurrentAmmo = new(0);
 
     public int MaxAmmo => _maxAmmo;
 
     private PlayerNetwork _playerNetwork;
     private double _nextServerShotTime;
+    private double _nextServerMeleeTime;
+    private double _nextLocalMeleeTime;
 
     private void Awake()
     {
         _playerNetwork = GetComponent<PlayerNetwork>();
     }
 
-    public override void OnNetworkSpawn()
+    public override void OnStartServer()
     {
-        if (IsServer)
-        {
-            RestoreAmmo();
-        }
+        RestoreAmmo();
     }
 
     private void Update()
@@ -47,14 +46,20 @@ public class PlayerCombat : NetworkBehaviour
             return;
         }
 
-        if (!_playerNetwork.IsAlive.Value)
+        if (!_playerNetwork.IsAlive.Value || !GameSessionManager.IsGameplayActive)
         {
             return;
         }
 
         if (Input.GetMouseButtonDown(0))
         {
-            RequestMeleeAttackServerRpc(Mathf.Max(0, _meleeDamage));
+            double localTime = Time.timeAsDouble;
+            float meleeCooldown = Mathf.Max(0.05f, _meleeCooldown);
+            if (localTime >= _nextLocalMeleeTime)
+            {
+                _nextLocalMeleeTime = localTime + meleeCooldown;
+                RequestMeleeAttackServerRpc(Mathf.Max(0, _meleeDamage));
+            }
         }
 
         if (Input.GetKeyDown(_projectileHotkey))
@@ -64,9 +69,9 @@ public class PlayerCombat : NetworkBehaviour
     }
 
     [ServerRpc]
-    private void ShootServerRpc(Vector3 shotOrigin, Vector3 shotDirection, ServerRpcParams rpc = default)
+    private void ShootServerRpc(Vector3 shotOrigin, Vector3 shotDirection, NetworkConnection conn = null)
     {
-        if (rpc.Receive.SenderClientId != OwnerClientId)
+        if (conn != Owner || !GameSessionManager.IsGameplayActive)
         {
             return;
         }
@@ -87,7 +92,7 @@ public class PlayerCombat : NetworkBehaviour
             return;
         }
 
-        double serverTime = NetworkManager.ServerTime.Time;
+        double serverTime = GetServerTime();
         if (serverTime < _nextServerShotTime)
         {
             return;
@@ -136,7 +141,7 @@ public class PlayerCombat : NetworkBehaviour
         Projectile projectile = projectileObject.GetComponent<Projectile>();
         if (projectile != null)
         {
-            projectile.Initialize(direction);
+            projectile.Initialize(direction, _playerNetwork);
         }
 
         NetworkObject projectileNetworkObject = projectileObject.GetComponent<NetworkObject>();
@@ -147,13 +152,13 @@ public class PlayerCombat : NetworkBehaviour
             return;
         }
 
-        projectileNetworkObject.SpawnWithOwnership(rpc.Receive.SenderClientId);
+        ServerManager.Spawn(projectileNetworkObject, conn);
     }
 
     [ServerRpc]
-    private void RequestMeleeAttackServerRpc(int damage, ServerRpcParams rpc = default)
+    private void RequestMeleeAttackServerRpc(int damage, NetworkConnection conn = null)
     {
-        if (rpc.Receive.SenderClientId != OwnerClientId)
+        if (conn != Owner || !GameSessionManager.IsGameplayActive)
         {
             return;
         }
@@ -169,25 +174,31 @@ public class PlayerCombat : NetworkBehaviour
             return;
         }
 
+        double serverTime = GetServerTime();
+        if (serverTime < _nextServerMeleeTime)
+        {
+            return;
+        }
+
+        _nextServerMeleeTime = serverTime + Mathf.Max(0.05f, _meleeCooldown);
         if (!TryGetNearestMeleeTarget(out PlayerNetwork target))
         {
             return;
         }
 
-        target.ApplyDamage(safeDamage);
+        target.ApplyDamage(safeDamage, _playerNetwork);
     }
 
     public void RestoreAmmo()
     {
-        if (!IsServer)
+        if (!IsServerStarted)
         {
             return;
         }
 
         CurrentAmmo.Value = _maxAmmo;
-        _nextServerShotTime = NetworkManager != null
-            ? NetworkManager.ServerTime.Time
-            : 0d;
+        _nextServerShotTime = GetServerTime();
+        _nextServerMeleeTime = 0d;
     }
 
     private Vector3 GetClientShotOrigin()
@@ -252,7 +263,7 @@ public class PlayerCombat : NetworkBehaviour
     private bool TryGetNearestMeleeTarget(out PlayerNetwork target)
     {
         target = null;
-        if (NetworkManager == null || NetworkObject == null)
+        if (!IsSpawned || ServerManager == null)
         {
             return false;
         }
@@ -261,9 +272,10 @@ public class PlayerCombat : NetworkBehaviour
         float bestDistanceSqr = float.MaxValue;
         Vector3 attackerPosition = transform.position;
 
-        foreach (NetworkObject spawnedObject in NetworkManager.SpawnManager.SpawnedObjectsList)
+        NetworkObject ownNetworkObject = NetworkObject;
+        foreach (NetworkObject spawnedObject in ServerManager.Objects.Spawned.Values)
         {
-            if (spawnedObject == null || spawnedObject == NetworkObject)
+            if (spawnedObject == null || spawnedObject == ownNetworkObject)
             {
                 continue;
             }
@@ -294,5 +306,10 @@ public class PlayerCombat : NetworkBehaviour
             && candidate.IsSpawned
             && candidate.IsAlive.Value
             && candidate.HP.Value > 0;
+    }
+
+    private double GetServerTime()
+    {
+        return TimeManager != null ? TimeManager.TicksToTime(TimeManager.Tick) : Time.timeAsDouble;
     }
 }
